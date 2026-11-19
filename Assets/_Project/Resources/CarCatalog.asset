@@ -1,0 +1,79 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ab5c57f5b5ca886489b361f735b13dfd, type: 3}
+  m_Name: CarCatalog
+  m_EditorClassIdentifier: 
+  cars:
+  - id: car_06
+    displayName: Car 06
+    model: {fileID: 52932905164622209, guid: 640b94cf88de4ef459ce14645b2736d9, type: 3}
+    price: 0
+    maxSpeed: 30
+    acceleration: 12
+    turnRate: 100
+    grip: 8.5
+    mass: 1100
+  - id: car_13
+    displayName: Car 13
+    model: {fileID: 400323601965181187, guid: fc1e359a90d4e6542b4d8022c50429ce, type: 3}
+    price: 600
+    maxSpeed: 32.4
+    acceleration: 13.2
+    turnRate: 104
+    grip: 9
+    mass: 1180
+  - id: car_16
+    displayName: Car 16
+    model: {fileID: 6797269430195769530, guid: 0f2505a3f5e77fa44a6703470cc30543, type: 3}
+    price: 1500
+    maxSpeed: 34.8
+    acceleration: 14.4
+    turnRate: 108
+    grip: 9.5
+    mass: 1260
+  - id: car_19
+    displayName: Car 19
+    model: {fileID: 5272454072200437660, guid: 4be47a48b47d6224ebb6430561872389, type: 3}
+    price: 3000
+    maxSpeed: 37.2
+    acceleration: 15.6
+    turnRate: 112
+    grip: 10
+    mass: 1340
+  - id: futuristic_car_1
+    displayName: Futuristic Car 1
+    model: {fileID: 1049787233113196042, guid: ff60e6cbfd0ed6e4bace0ea2a2f5a238, type: 3}
+    price: 5000
+    maxSpeed: 39.6
+    acceleration: 16.8
+    turnRate: 116
+    grip: 10.5
+    mass: 1420
+  - id: van
+    displayName: Van
+    model: {fileID: 787257008305991662, guid: 6fda6d14dbbf5c54fb01d830757a8d1f, type: 3}
+    price: 8000
+    maxSpeed: 42
+    acceleration: 18
+    turnRate: 120
+    grip: 11
+    mass: 1500
+  - id: van
+    displayName: Van
+    model: {fileID: 787257008305991662, guid: 6fda6d14dbbf5c54fb01d830757a8d1f, type: 3}
+    price: 8000
+    maxSpeed: 42
+    acceleration: 18
+    turnRate: 120
+    grip: 11
+    mass: 1500
+  startingCoins: 100
