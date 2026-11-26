@@ -281,11 +281,36 @@ namespace PoliceChase.Police
         {
             message = msg;
             messageUntil = Time.time + seconds;
+            MessageStartTime = Time.unscaledTime;
         }
+
+        // ───────────── Thông tin cho giao diện (GameHUD) ─────────────
+
+        [Tooltip("Tự vẽ giao diện kiểu cũ (OnGUI). GameHUD tắt ô này và tự vẽ giao diện mới")]
+        public bool drawHud = true;
+
+        /// <summary>Thông báo lớn đang hiển thị (null nếu không có).</summary>
+        public string CurrentMessage => Time.time < messageUntil ? message : null;
+        public float MessageStartTime { get; private set; }
+
+        public string StatusText
+        {
+            get
+            {
+                if (busted) return "Bị bắt";
+                if (WantedLevel == 0) return reheatTimer > 0f ? $"An toàn · {reheatTimer:0}s nữa bị truy nã lại" : "Không bị truy nã";
+                if (PlayerSeen) return "Cảnh sát đang thấy bạn!";
+                if (seenSinceWanted) return $"Đang trốn · còn {Mathf.Max(0f, escapeTime - unseenTimer):0.0}s";
+                return "Cảnh sát đang tới...";
+            }
+        }
+
+        /// <summary>0..1 tiến độ trốn thoát khi không bị nhìn thấy (để vẽ thanh).</summary>
+        public float EscapeProgress => WantedLevel > 0 && seenSinceWanted && !PlayerSeen ? Mathf.Clamp01(unseenTimer / escapeTime) : 0f;
 
         void OnGUI()
         {
-            if (player == null) return;
+            if (player == null || !drawHud) return;
             if (bigStyle == null)
             {
                 bigStyle = new GUIStyle(GUI.skin.label) { fontSize = 48, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };

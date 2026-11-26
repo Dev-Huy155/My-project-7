@@ -1,74 +1,75 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.InputSystem.UI;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using PoliceChase.Game;
 
 namespace PoliceChase.UI
 {
     /// <summary>
-    /// Menu chính / garage – dựng toàn bộ giao diện bằng code (không cần kéo thả UI):
-    /// - xem xe 3D quay trên bệ, chuyển xe bằng nút &lt; &gt; (hoặc phím ← →),
-    /// - mua xe, chọn xe đang dùng, nâng cấp 4 hạng mục (Động cơ, Lái, Độ bền, Nitro),
-    /// - chọn chế độ (Trốn cảnh sát / Lái tự do) rồi bấm CHƠI.
+    /// Menu garage kiểu game đua xe (neon xanh + vàng), dựng hoàn toàn bằng code:
+    /// logo + tên game, xu + cài đặt, bảng NÂNG CẤP, thẻ thông tin xe, bảng CHẾ ĐỘ CHƠI, nút CHƠI vàng,
+    /// phông thành phố đêm + bệ xe phát sáng. Chạy trên PC và điện thoại.
     /// Đặt vào 1 GameObject rỗng trong scene MainMenu.
     /// </summary>
     public class MainMenuUI : MonoBehaviour
     {
         [Tooltip("Tên scene chơi (phải có trong File > Build Profiles > Scene List)")]
-        public string gameSceneName = "ColorCity";
+        public string gameSceneName = "CityGame";
         public string gameTitle = "CẢNH SÁT TRUY ĐUỔI";
-        public Color backgroundColor = new Color(0.12f, 0.14f, 0.2f);
-        public float turntableSpeed = 25f;
+        public string gameSubtitle = "SPEED CHASE";
+        public string tagline = "TRỐN THOÁT  •  TĂNG TỐC  •  HUYỀN THOẠI";
+        public float turntableSpeed = 18f;
+
+        [Header("Camera xem xe")]
+        public Vector3 cameraPosition = new Vector3(0f, 3.1f, -10.5f);
+        public Vector3 cameraLookAt = new Vector3(0f, -0.55f, 0f);
+        public float cameraFov = 31f;
 
         static readonly UpgradeType[] UpgradeOrder = { UpgradeType.Engine, UpgradeType.Handling, UpgradeType.Durability, UpgradeType.Nitro };
-        static readonly Color PanelColor = new Color(0f, 0f, 0f, 0.55f);
-        static readonly Color Accent = new Color(1f, 0.78f, 0.15f);
-        static readonly Color Green = new Color(0.25f, 0.75f, 0.35f);
-        static readonly Color Blue = new Color(0.25f, 0.55f, 0.95f);
-        static readonly Color Gray = new Color(0.35f, 0.37f, 0.42f);
+        static readonly string[] UpgradeIcons = { "engine", "spring", "disc", "bottle" };
+        static readonly float[] DurationValues = { 180f, 300f, 0f };
+        static readonly string[] DurationNames = { "3 phút", "5 phút", "Không giới hạn" };
 
         CarCatalog catalog;
         int index;
-        Font font;
-
-        // Xem trước 3D
         Transform turntable, currentModel;
-
-        // Các phần giao diện cần cập nhật
-        Text coinsText, carNameText, carStatusText, actionLabel, modeDesc, messageText, playLabel;
-        Image actionImage;
-        Button actionButton;
-        readonly List<Image> statFills = new List<Image>();
-        readonly List<Text> statValues = new List<Text>();
-        readonly List<Text> upgradeCostLabels = new List<Text>();
-        readonly List<Image> upgradeButtonImages = new List<Image>();
-        readonly List<Image[]> upgradePips = new List<Image[]>();
-        Image chaseModeImage, freeModeImage;
-        static readonly float[] DurationValues = { 180f, 300f, 0f };
-        static readonly string[] DurationNames = { "3 phút", "5 phút", "Không giới hạn" };
-        readonly List<Image> durationImages = new List<Image>();
-        GameObject upgradesLocked;
-        float messageUntil;
         CarStats maxStats;
+
+        // Phần giao diện cần cập nhật
+        RectTransform coinIcon;
+        Text coinsText, carNameText, statusText, modeDesc, toastText;
+        NeonFrame statusPill;
+        Image statusIcon;
+        NeonButton actionButton, playButton;
+        CanvasGroup toastGroup;
+        float toastTime = -100f, toastDuration = 2.2f;
+        readonly List<ProgressBar> statBars = new List<ProgressBar>();
+        readonly List<Text> statValues = new List<Text>();
+        readonly List<NeonButton> upgradeButtons = new List<NeonButton>();
+        readonly List<Image[]> upgradePips = new List<Image[]>();
+        readonly List<NeonButton> modeButtons = new List<NeonButton>();
+        readonly List<NeonButton> durationButtons = new List<NeonButton>();
+        readonly List<NeonButton> qualityButtons = new List<NeonButton>();
+        NeonButton resetButton;
+        GameObject upgradesLocked;
+        UIFade settingsPanel;
+        float resetArmedUntil;
 
         void Start()
         {
             catalog = CarCatalog.Load();
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            SceneLoader.GameTitle = gameTitle;
             if (GameSession.RoundSeconds < 0f) GameSession.RoundSeconds = DurationValues[0];
             SetupScene();
             BuildUI();
 
             if (catalog == null || catalog.cars.Count == 0)
             {
-                ShowMessage("Chưa có danh sách xe. Dùng Tools > Police Chase > Tạo danh sách xe tự động", 999f);
+                Toast("Chưa có danh sách xe – dùng Tools > Police Chase > Tạo danh sách xe tự động", 999f);
                 return;
             }
             ComputeMaxStats();
-            index = catalog.IndexOf(SaveSystem.Data.selectedCar);
+            index = Mathf.Max(0, catalog.IndexOf(SaveSystem.Data.selectedCar));
             ShowCar();
             SaveSystem.Changed += Refresh;
         }
@@ -78,13 +79,23 @@ namespace PoliceChase.UI
         void Update()
         {
             if (turntable != null) turntable.Rotate(0f, turntableSpeed * Time.deltaTime, 0f);
-            if (messageText != null && Time.time > messageUntil) messageText.text = "";
+
+            float ta = Time.unscaledTime - toastTime;
+            toastGroup.alpha = ta < 0.15f ? ta / 0.15f : (ta < toastDuration ? 1f : Mathf.Clamp01(1f - (ta - toastDuration) / 0.3f));
+
+            if (resetButton != null && resetArmedUntil > 0f && Time.unscaledTime > resetArmedUntil)
+            {
+                resetArmedUntil = 0f;
+                resetButton.SetText("XOÁ DỮ LIỆU CHƠI");
+            }
 
             var kb = UnityEngine.InputSystem.Keyboard.current;
-            if (kb != null && catalog != null && catalog.cars.Count > 0)
+            if (kb == null || settingsPanel.gameObject.activeSelf) return;
+            if (catalog != null && catalog.cars.Count > 0)
             {
                 if (kb.leftArrowKey.wasPressedThisFrame || kb.aKey.wasPressedThisFrame) Step(-1);
                 if (kb.rightArrowKey.wasPressedThisFrame || kb.dKey.wasPressedThisFrame) Step(1);
+                if (kb.enterKey.wasPressedThisFrame) OnPlay();
             }
         }
 
@@ -105,17 +116,13 @@ namespace PoliceChase.UI
             if (car == null) return;
             if (!SaveSystem.Owns(car.id))
             {
-                if (SaveSystem.TryBuy(car))
-                {
-                    SaveSystem.Select(car.id);
-                    ShowMessage($"Đã mua {car.displayName}!", 2.5f);
-                }
-                else ShowMessage($"Chưa đủ xu – cần thêm {car.price - SaveSystem.Coins:N0} xu", 2.5f);
+                if (SaveSystem.TryBuy(car)) { SaveSystem.Select(car.id); Toast($"Đã mua {car.displayName}!"); }
+                else Toast($"Chưa đủ xu · cần thêm {car.price - SaveSystem.Coins:N0} xu");
             }
             else if (SaveSystem.Data.selectedCar != car.id)
             {
                 SaveSystem.Select(car.id);
-                ShowMessage($"Đã chọn {car.displayName}", 2f);
+                Toast($"Đã chọn {car.displayName}");
             }
             Refresh();
         }
@@ -125,40 +132,29 @@ namespace PoliceChase.UI
             var car = Current;
             if (car == null || !SaveSystem.Owns(car.id)) return;
             int level = SaveSystem.GetUpgrades(car.id).Get(type);
-            if (level >= UpgradeRules.MaxLevel) { ShowMessage("Đã nâng cấp tối đa", 2f); return; }
+            if (level >= UpgradeRules.MaxLevel) { Toast("Đã nâng cấp tối đa"); return; }
             int cost = UpgradeRules.Cost(car, type, level);
-            if (SaveSystem.TryUpgrade(car, type)) ShowMessage($"{UpgradeRules.Name(type)} lên cấp {level + 1}!", 2f);
-            else ShowMessage($"Chưa đủ xu – cần {cost:N0} xu", 2f);
+            if (SaveSystem.TryUpgrade(car, type)) Toast($"{UpgradeRules.Name(type)} lên cấp {level + 1}!");
+            else Toast($"Chưa đủ xu · cần {cost:N0} xu");
             Refresh();
         }
 
-        void SetMode(GameMode mode)
-        {
-            GameSession.Mode = mode;
-            Refresh();
-        }
-
-        void SetDuration(float seconds)
-        {
-            GameSession.RoundSeconds = seconds;
-            Refresh();
-        }
+        void SetMode(GameMode m) { GameSession.Mode = m; Refresh(); }
+        void SetDuration(float s) { GameSession.RoundSeconds = s; Refresh(); }
 
         void OnPlay()
         {
-            if (!Application.CanStreamedLevelBeLoaded(gameSceneName))
-            {
-                ShowMessage($"Chưa thêm scene '{gameSceneName}' vào File > Build Profiles > Scene List", 5f);
-                return;
-            }
-            SceneManager.LoadScene(gameSceneName);
+            var sel = catalog != null ? catalog.Find(SaveSystem.Data.selectedCar) : null;
+            if (sel != null && !SaveSystem.Owns(sel.id)) { Toast("Hãy chọn một xe bạn đã sở hữu"); return; }
+            if (!SceneLoader.Load(gameSceneName, "Đang vào thành phố..."))
+                Toast($"Chưa thêm scene '{gameSceneName}' vào File > Build Profiles", 5f);
         }
 
-        void ShowMessage(string msg, float seconds)
+        void Toast(string msg, float seconds = 2.2f)
         {
-            if (messageText == null) return;
-            messageText.text = msg;
-            messageUntil = Time.time + seconds;
+            toastText.text = msg;
+            toastTime = Time.unscaledTime;
+            toastDuration = seconds;
         }
 
         // ───────────────────────── Cập nhật giao diện ─────────────────────────
@@ -174,15 +170,18 @@ namespace PoliceChase.UI
 
         void Refresh()
         {
-            coinsText.text = $"Xu: {SaveSystem.Coins:N0}";
+            coinsText.text = "Xu: " + SaveSystem.Coins.ToString("N0");
+            coinIcon.anchoredPosition = new Vector2(-150f - coinsText.preferredWidth - 14f, -24f);
+
             bool chase = GameSession.Mode == GameMode.Chase;
-            chaseModeImage.color = chase ? Blue : Gray;
-            freeModeImage.color = chase ? Gray : Blue;
-            for (int i = 0; i < durationImages.Count; i++)
-                durationImages[i].color = Mathf.Approximately(GameSession.RoundSeconds, DurationValues[i]) ? Blue : Gray;
+            modeButtons[0].SetStyle(chase ? ButtonStyle.Blue : ButtonStyle.Dark);
+            modeButtons[1].SetStyle(chase ? ButtonStyle.Dark : ButtonStyle.Blue);
             modeDesc.text = chase
                 ? "Bị truy nã! Trốn cảnh sát, nhặt xu. Bị truy nã càng lâu, càng nhiều sao, thưởng càng lớn."
-                : "Không có cảnh sát. Thoải mái dạo phố, nhặt xu và chạy thử xe mới.";
+                : "Không có cảnh sát. Thoải mái dạo phố, nhặt xu và chạy thử xe.";
+            for (int i = 0; i < DurationValues.Length; i++)
+                durationButtons[i].SetStyle(Mathf.Approximately(GameSession.RoundSeconds, DurationValues[i]) ? ButtonStyle.Blue : ButtonStyle.Dark);
+            RefreshQuality();
 
             var car = Current;
             if (car == null) return;
@@ -191,59 +190,80 @@ namespace PoliceChase.UI
             var up = SaveSystem.GetUpgrades(car.id);
             var s = UpgradeRules.Compute(car, up);
 
+            // Thẻ xe
             carNameText.text = car.displayName;
-            carStatusText.text = owned ? (selected ? "Đang dùng" : "Đã sở hữu") : $"Giá: {car.price:N0} xu";
-            carStatusText.color = owned ? Green : Accent;
-
-            float[] values = { s.maxSpeed, s.acceleration, s.turnRate * s.grip, s.mass, s.nitroSeconds };
-            float[] maxes = { maxStats.maxSpeed, maxStats.acceleration, maxStats.turnRate * maxStats.grip, maxStats.mass, maxStats.nitroSeconds };
-            string[] labels =
+            if (owned)
             {
-                $"{s.maxSpeed * 3.6f:0} km/h", $"{s.acceleration:0.0}", $"{s.turnRate:0}°/s", $"{s.mass:0} kg",
-                s.nitroSeconds > 0f ? $"{s.nitroSeconds:0.0} s" : "chưa có",
-            };
-            for (int i = 0; i < statFills.Count; i++)
-            {
-                float t = maxes[i] > 0f ? Mathf.Clamp01(values[i] / maxes[i]) : 0f;
-                statFills[i].rectTransform.anchorMax = new Vector2(Mathf.Max(0.02f, t), 1f);
-                statValues[i].text = labels[i];
-            }
-
-            if (!owned)
-            {
-                actionLabel.text = $"MUA – {car.price:N0} xu";
-                actionImage.color = SaveSystem.Coins >= car.price ? Green : Gray;
-            }
-            else if (!selected)
-            {
-                actionLabel.text = "CHỌN XE NÀY";
-                actionImage.color = Blue;
+                statusText.text = selected ? "Đang dùng" : "Đã sở hữu";
+                statusText.color = new Color(0.45f, 1f, 0.6f);
+                statusIcon.sprite = UIKit.Icon("checkCircle");
+                statusIcon.color = new Color(0.3f, 0.95f, 0.5f);
+                statusPill.SetColors(new Color(0.05f, 0.25f, 0.14f, 0.95f), new Color(0.02f, 0.14f, 0.08f, 0.95f), new Color(0.35f, 1f, 0.55f, 0.7f), Color.clear);
             }
             else
             {
-                actionLabel.text = "ĐANG DÙNG";
-                actionImage.color = Gray;
+                statusText.text = $"{car.price:N0} Xu";
+                statusText.color = GameSkin.Yellow;
+                statusIcon.sprite = UIKit.Icon("lock");
+                statusIcon.color = GameSkin.Yellow;
+                statusPill.SetColors(new Color(0.28f, 0.2f, 0.04f, 0.95f), new Color(0.16f, 0.1f, 0.02f, 0.95f), new Color(1f, 0.8f, 0.3f, 0.7f), Color.clear);
             }
 
-            var selectedDef = catalog.Find(SaveSystem.Data.selectedCar);
-            playLabel.text = selectedDef != null ? $"CHƠI  ·  {selectedDef.displayName}" : "CHƠI";
+            float[] values = { s.maxSpeed, s.acceleration, s.turnRate * s.grip, s.mass, s.nitroSeconds };
+            float[] maxes = { maxStats.maxSpeed, maxStats.acceleration, maxStats.turnRate * maxStats.grip, maxStats.mass, maxStats.nitroSeconds };
+            float handling = maxes[2] > 0f ? values[2] / maxes[2] * 100f : 0f;
+            string[] labels =
+            {
+                $"{s.maxSpeed * 3.6f:0} km/h", $"{s.acceleration:0.0}", $"{handling:0} %", $"{s.mass:0} kg",
+                s.nitroSeconds > 0f ? $"{s.nitroSeconds:0.0} giây" : "Chưa có",
+            };
+            for (int i = 0; i < statBars.Count; i++)
+            {
+                statBars[i].Set(maxes[i] > 0f ? Mathf.Max(0.03f, values[i] / maxes[i]) : 0.03f);
+                statValues[i].text = labels[i];
+            }
 
+            // Nút hành động
+            if (!owned)
+            {
+                bool afford = SaveSystem.Coins >= car.price;
+                actionButton.SetText($"MUA XE · {car.price:N0} XU");
+                actionButton.SetIcon("lock");
+                actionButton.SetStyle(afford ? ButtonStyle.Green : ButtonStyle.Disabled);
+            }
+            else if (!selected)
+            {
+                actionButton.SetText("CHỌN XE NÀY");
+                actionButton.SetIcon("play");
+                actionButton.SetStyle(ButtonStyle.Blue);
+            }
+            else
+            {
+                actionButton.SetText("ĐANG DÙNG XE NÀY");
+                actionButton.SetIcon("checkCircle");
+                actionButton.SetStyle(ButtonStyle.Dark);
+            }
+
+            var sel = catalog.Find(SaveSystem.Data.selectedCar);
+            playButton.SetText(sel != null ? "CHƠI  ·  " + sel.displayName : "CHƠI");
+
+            // Nâng cấp
             upgradesLocked.SetActive(!owned);
             for (int i = 0; i < UpgradeOrder.Length; i++)
             {
                 int level = up.Get(UpgradeOrder[i]);
                 for (int p = 0; p < upgradePips[i].Length; p++)
-                    upgradePips[i][p].color = p < level ? Accent : new Color(1f, 1f, 1f, 0.15f);
+                    upgradePips[i][p].color = p < level ? GameSkin.Yellow : GameSkin.PipOff;
                 if (level >= UpgradeRules.MaxLevel)
                 {
-                    upgradeCostLabels[i].text = "TỐI ĐA";
-                    upgradeButtonImages[i].color = Gray;
+                    upgradeButtons[i].SetText("TỐI ĐA");
+                    upgradeButtons[i].SetStyle(ButtonStyle.Dark);
                 }
                 else
                 {
                     int cost = UpgradeRules.Cost(car, UpgradeOrder[i], level);
-                    upgradeCostLabels[i].text = $"{cost:N0} xu";
-                    upgradeButtonImages[i].color = owned && SaveSystem.Coins >= cost ? Green : Gray;
+                    upgradeButtons[i].SetText($"{cost:N0} Xu");
+                    upgradeButtons[i].SetStyle(owned && SaveSystem.Coins >= cost ? ButtonStyle.Blue : ButtonStyle.Disabled);
                 }
             }
         }
@@ -265,7 +285,7 @@ namespace PoliceChase.UI
             }
         }
 
-        // ───────────────────────── Cảnh 3D xem trước ─────────────────────────
+        // ───────────────────────── Cảnh 3D ─────────────────────────
 
         void SetupScene()
         {
@@ -276,31 +296,15 @@ namespace PoliceChase.UI
                 cam = camGo.AddComponent<Camera>();
                 camGo.AddComponent<AudioListener>();
             }
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = backgroundColor;
-            // Nhìn hơi thấp hơn xe để xe hiện ở khoảng giữa-trên màn hình (phần dưới có bảng thông tin).
-            cam.transform.position = new Vector3(0f, 3f, -10f);
-            cam.transform.LookAt(new Vector3(0f, -0.8f, 0f));
-            cam.fieldOfView = 40f;
-
-            if (FindFirstObjectByType<Light>() == null)
-            {
-                var l = new GameObject("Directional Light").AddComponent<Light>();
-                l.type = LightType.Directional;
-                l.intensity = 1.3f;
-                l.transform.rotation = Quaternion.Euler(45f, -35f, 0f);
-            }
+            cam.transform.position = cameraPosition;
+            cam.transform.LookAt(cameraLookAt);
+            cam.fieldOfView = cameraFov;
 
             var root = new GameObject("CarPreview").transform;
+            MenuBackdrop.Build(cam, root);
             turntable = new GameObject("Turntable").transform;
             turntable.SetParent(root, false);
-            var floor = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            floor.name = "Platform";
-            Destroy(floor.GetComponent<Collider>());
-            floor.transform.SetParent(turntable, false);
-            floor.transform.localPosition = new Vector3(0f, -0.05f, 0f);
-            floor.transform.localScale = new Vector3(7f, 0.05f, 7f);
-            floor.GetComponent<MeshRenderer>().material.color = new Color(0.22f, 0.24f, 0.3f);
+            turntable.localPosition = new Vector3(0f, 0.065f, 0f);
         }
 
         Transform BuildPreview(CarDef car)
@@ -319,12 +323,10 @@ namespace PoliceChase.UI
 
             go.transform.SetParent(turntable, false);
             go.transform.localRotation = Quaternion.identity;
-
-            // Nằm ngang → xoay cho đầu xe theo trục Z; co giãn dài ~4.5m; đặt lên bệ.
             if (TryBounds(go, out Bounds b))
             {
                 if (b.size.x > b.size.z * 1.2f) { go.transform.localRotation = Quaternion.Euler(0f, 90f, 0f); TryBounds(go, out b); }
-                float s = 4.5f / Mathf.Max(0.01f, Mathf.Max(b.size.x, b.size.z));
+                float s = 4.6f / Mathf.Max(0.01f, Mathf.Max(b.size.x, b.size.z));
                 go.transform.localScale *= s;
                 TryBounds(go, out b);
                 go.transform.position += new Vector3(turntable.position.x - b.center.x, turntable.position.y - b.min.y, turntable.position.z - b.center.z);
@@ -347,147 +349,319 @@ namespace PoliceChase.UI
 
         void BuildUI()
         {
-            if (FindFirstObjectByType<EventSystem>() == null)
-                new GameObject("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
+            var canvas = UIKit.CreateCanvas("MenuCanvas");
+            BuildBottomBar(canvas.transform);
+            var safe = UIKit.SafeArea(canvas.transform);
 
-            var canvasGo = new GameObject("MenuCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-            var canvas = canvasGo.GetComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = canvasGo.GetComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920f, 1080f);
-            scaler.matchWidthOrHeight = 0.5f;
-            var root = canvasGo.transform;
+            BuildTopBar(safe);
+            BuildUpgrades(safe);
+            BuildModePanel(safe);
+            BuildCarCard(safe);
 
-            // ── Thanh trên cùng ──
-            var top = Panel(root, "TopBar", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -90f), Vector2.zero, PanelColor);
-            Label(top, gameTitle, 40, Color.white, TextAnchor.MiddleLeft, new Vector2(0f, 0f), new Vector2(0.6f, 1f), new Vector2(40f, 0f), Vector2.zero);
-            coinsText = Label(top, "Xu: 0", 38, Accent, TextAnchor.MiddleRight, new Vector2(0.5f, 0f), new Vector2(1f, 1f), Vector2.zero, new Vector2(-40f, 0f));
+            // Thông báo
+            var toast = GameSkin.Frame(safe, "Toast", FrameShape.Pill, GameSkin.PanelTop, GameSkin.PanelBottom, GameSkin.Edge, GameSkin.Glow);
+            UIKit.Place(toast.rect, new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(780f, 66f));
+            toastGroup = toast.gameObject.AddComponent<CanvasGroup>();
+            toastGroup.alpha = 0f;
+            toastGroup.blocksRaycasts = false;
+            toastText = UIKit.Label(toast.rect, "", 28, GameSkin.TextLight);
+            UIKit.Anchors(toastText.rectTransform, Vector2.zero, Vector2.one, new Vector2(24f, 0f), new Vector2(-24f, 0f));
 
-            // ── Bên trái: nâng cấp ──
-            var left = Panel(root, "Upgrades", new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(30f, 180f), new Vector2(560f, -120f), PanelColor);
-            Label(left, "NÂNG CẤP", 32, Accent, TextAnchor.MiddleLeft, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, -60f), new Vector2(-24f, -10f));
+            BuildSettings(canvas.transform);
+        }
+
+        void BuildTopBar(RectTransform safe)
+        {
+            var logo = new GameObject("Logo", typeof(RectTransform)).AddComponent<Image>();
+            logo.transform.SetParent(safe, false);
+            logo.sprite = GameSkin.SpeedLogo;
+            logo.raycastTarget = false;
+            UIKit.Place(logo.rectTransform, new Vector2(0f, 1f), new Vector2(26f, 6f), new Vector2(160f, 160f));
+
+            var title = GameSkin.Title(safe, gameTitle, 76, Color.white);
+            UIKit.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(196f, -14f), new Vector2(1000f, 90f));
+            title.gameObject.AddComponent<UIGradient>().Set(Color.white, new Color(0.72f, 0.84f, 1f));
+            var outline = title.gameObject.AddComponent<Outline>();
+            outline.effectColor = new Color(0.05f, 0.2f, 0.6f, 0.8f);
+            outline.effectDistance = new Vector2(2f, -2f);
+
+            var sub = GameSkin.Title(safe, gameSubtitle, 36, GameSkin.Cyan);
+            UIKit.Place(sub.rectTransform, new Vector2(0f, 1f), new Vector2(202f, -100f), new Vector2(600f, 44f));
+            var stripes = new GameObject("Stripes", typeof(RectTransform)).AddComponent<Image>();
+            stripes.transform.SetParent(safe, false);
+            stripes.sprite = GameSkin.Stripes;
+            stripes.color = new Color(0.25f, 0.55f, 1f, 0.8f);
+            stripes.raycastTarget = false;
+            UIKit.Place(stripes.rectTransform, new Vector2(0f, 1f), new Vector2(212f + sub.preferredWidth, -104f), new Vector2(200f, 36f));
+
+            // Xu + cài đặt (góc phải)
+            var gear = GameSkin.Button(safe, "", ButtonStyle.Dark, OpenSettings, "gear", 46);
+            gear.frame.SetColors(new Color(0.1f, 0.18f, 0.4f), new Color(0.03f, 0.07f, 0.18f), GameSkin.Edge, GameSkin.Glow);
+            UIKit.Place(gear.frame.rect, new Vector2(1f, 1f), new Vector2(-26f, -20f), new Vector2(92f, 92f));
+            gear.content.GetComponent<HorizontalLayoutGroup>().padding = new RectOffset(0, 0, 0, 0);
+
+            var div = UIKit.Box(safe, "Divider", new Color(0.7f, 0.8f, 1f, 0.6f), true);
+            UIKit.Place(div.rectTransform, new Vector2(1f, 1f), new Vector2(-142f, -36f), new Vector2(4f, 60f));
+
+            coinsText = GameSkin.Title(safe, "Xu: 0", 52, GameSkin.Yellow, TextAnchor.MiddleRight);
+            UIKit.Place(coinsText.rectTransform, new Vector2(1f, 1f), new Vector2(-160f, -20f), new Vector2(420f, 92f));
+            var coin = new GameObject("Coin", typeof(RectTransform)).AddComponent<Image>();
+            coin.transform.SetParent(safe, false);
+            coin.sprite = GameSkin.Coin;
+            coin.raycastTarget = false;
+            coinIcon = coin.rectTransform;
+            UIKit.Place(coinIcon, new Vector2(1f, 1f), new Vector2(-300f, -24f), new Vector2(72f, 72f));
+        }
+
+        void BuildBottomBar(Transform canvas)
+        {
+            var bar = UIKit.NewRect(canvas, "BottomBar").gameObject.AddComponent<Image>();
+            bar.raycastTarget = false;
+            UIKit.Anchors(bar.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 84f));
+            bar.gameObject.AddComponent<UIGradient>().Set(new Color(0.06f, 0.12f, 0.3f, 0.95f), new Color(0.01f, 0.03f, 0.09f, 0.98f));
+
+            var glow = UIKit.NewRect(bar.transform, "Glow").gameObject.AddComponent<Image>();
+            glow.sprite = GameSkin.SoftDot;
+            glow.color = new Color(0.2f, 0.55f, 1f, 0.55f);
+            glow.raycastTarget = false;
+            UIKit.Anchors(glow.rectTransform, new Vector2(0.1f, 1f), new Vector2(0.9f, 1f), new Vector2(0f, -14f), new Vector2(0f, 14f));
+            var line = UIKit.NewRect(bar.transform, "Line").gameObject.AddComponent<Image>();
+            line.color = new Color(0.4f, 0.75f, 1f);
+            line.raycastTarget = false;
+            UIKit.Anchors(line.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -3f), Vector2.zero);
+
+            var stripes = UIKit.NewRect(bar.transform, "Stripes").gameObject.AddComponent<Image>();
+            stripes.sprite = GameSkin.Stripes;
+            stripes.color = new Color(0.25f, 0.55f, 1f, 0.7f);
+            stripes.raycastTarget = false;
+            UIKit.Place(stripes.rectTransform, new Vector2(0f, 0.5f), new Vector2(30f, -4f), new Vector2(150f, 46f));
+
+            var hint = UIKit.Label(bar.transform, "A / D  đổi xe     ENTER  vào chơi", 24, GameSkin.TextDim, TextAnchor.MiddleLeft, false);
+            UIKit.Place(hint.rectTransform, new Vector2(0f, 0.5f), new Vector2(200f, -4f), new Vector2(600f, 40f));
+            if (Application.isMobilePlatform) hint.gameObject.SetActive(false);
+
+            var tag = GameSkin.Title(bar.transform, tagline, 32, new Color(0.6f, 0.72f, 0.95f), TextAnchor.MiddleRight);
+            UIKit.Place(tag.rectTransform, new Vector2(1f, 0.5f), new Vector2(-150f, -4f), new Vector2(900f, 50f));
+            var flag = UIKit.IconImage(bar.transform, "flag", new Color(0.5f, 0.7f, 1f, 0.9f), 56f);
+            UIKit.Place(flag.rectTransform, new Vector2(1f, 0.5f), new Vector2(-70f, -4f), new Vector2(56f, 56f));
+        }
+
+        void BuildUpgrades(RectTransform safe)
+        {
+            var panel = GameSkin.Panel(safe, "Upgrades");
+            UIKit.Place(panel.rect, new Vector2(0f, 1f), new Vector2(28f, -150f), new Vector2(520f, 740f));
+            GameSkin.Header(panel.rect, "wrench", "NÂNG CẤP");
+
             for (int i = 0; i < UpgradeOrder.Length; i++)
             {
                 var type = UpgradeOrder[i];
-                float y = -80f - i * 150f;
-                var row = Panel(left, "Row_" + type, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, y - 140f), new Vector2(-16f, y), new Color(1f, 1f, 1f, 0.06f));
-                Label(row, UpgradeRules.Name(type), 26, Color.white, TextAnchor.UpperLeft, new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(16f, 10f), new Vector2(-16f, -10f));
-                Label(row, UpgradeRules.Description(type), 17, new Color(1f, 1f, 1f, 0.7f), TextAnchor.UpperLeft, new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(16f, 10f), new Vector2(-16f, -46f));
+                var row = GameSkin.Row(panel.rect, "Row_" + type);
+                UIKit.Anchors(row.rect, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -90f - (i + 1) * 158f + 12f), new Vector2(-16f, -90f - i * 158f));
 
-                var pips = new Image[UpgradeRules.MaxLevel];
-                for (int p = 0; p < pips.Length; p++)
-                    pips[p] = Panel(row, "Pip" + p, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(16f + p * 36f, 18f), new Vector2(16f + p * 36f + 28f, 40f), Color.white).GetComponent<Image>();
-                upgradePips.Add(pips);
+                var tile = GameSkin.IconTile(row.rect, UpgradeIcons[i], 118f);
+                UIKit.Place(tile.rect, new Vector2(0f, 0.5f), new Vector2(12f, 0f), new Vector2(118f, 118f));
+
+                var name = UIKit.Label(row.rect, UpgradeRules.Name(type), 34, GameSkin.TextLight, TextAnchor.MiddleLeft);
+                UIKit.Place(name.rectTransform, new Vector2(0f, 1f), new Vector2(146f, -10f), new Vector2(330f, 40f));
+                var desc = UIKit.Label(row.rect, UpgradeRules.Description(type), 22, GameSkin.TextDim, TextAnchor.MiddleLeft, false);
+                desc.horizontalOverflow = HorizontalWrapMode.Overflow;
+                UIKit.Place(desc.rectTransform, new Vector2(0f, 1f), new Vector2(146f, -50f), new Vector2(330f, 28f));
+
+                upgradePips.Add(GameSkin.Pips(row.rect, UpgradeRules.MaxLevel, new Vector2(146f, 18f), new Vector2(30f, 24f), 6f));
 
                 var t = type;
-                var btn = MakeButton(row, "", 22, Green, () => OnUpgrade(t), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-200f, 12f), new Vector2(-12f, 62f), out Text costLabel);
-                upgradeCostLabels.Add(costLabel);
-                upgradeButtonImages.Add(btn.GetComponent<Image>());
+                var btn = GameSkin.Button(row.rect, "0 Xu", ButtonStyle.Blue, () => OnUpgrade(t), null, 32);
+                UIKit.Place(btn.frame.rect, new Vector2(1f, 0f), new Vector2(-12f, 10f), new Vector2(160f, 56f));
+                upgradeButtons.Add(btn);
             }
-            var lockGo = Panel(left, "Locked", new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(0f, 0f), new Vector2(0f, -70f), new Color(0f, 0f, 0f, 0.6f));
-            Label(lockGo, "Mua xe này để nâng cấp", 28, Color.white, TextAnchor.MiddleCenter, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            upgradesLocked = lockGo.gameObject;
 
-            // ── Bên phải: chế độ chơi + mua/chọn + chơi ──
-            var right = Panel(root, "Modes", new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-560f, 180f), new Vector2(-30f, -120f), PanelColor);
-            Label(right, "CHẾ ĐỘ CHƠI", 32, Accent, TextAnchor.MiddleLeft, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, -60f), new Vector2(-24f, -10f));
-            var chaseBtn = MakeButton(right, "TRỐN CẢNH SÁT", 26, Blue, () => SetMode(GameMode.Chase), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, -150f), new Vector2(-24f, -80f), out _);
-            var freeBtn = MakeButton(right, "LÁI TỰ DO", 26, Gray, () => SetMode(GameMode.FreeRoam), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, -235f), new Vector2(-24f, -165f), out _);
-            chaseModeImage = chaseBtn.GetComponent<Image>();
-            freeModeImage = freeBtn.GetComponent<Image>();
-            modeDesc = Label(right, "", 20, new Color(1f, 1f, 1f, 0.8f), TextAnchor.UpperLeft, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, -340f), new Vector2(-24f, -248f));
+            var locked = UIKit.Box(panel.rect, "Locked", new Color(0.02f, 0.04f, 0.1f, 0.86f), false, 1f);
+            UIKit.Anchors(locked.rectTransform, Vector2.zero, Vector2.one, new Vector2(10f, 10f), new Vector2(-10f, -84f));
+            var lockIcon = UIKit.IconImage(locked.transform, "lock", GameSkin.Yellow, 80f);
+            UIKit.Place(lockIcon.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 50f), new Vector2(80f, 80f));
+            var lockText = GameSkin.Title(locked.transform, "MUA XE NÀY ĐỂ NÂNG CẤP", 34, GameSkin.TextLight, TextAnchor.MiddleCenter);
+            UIKit.Place(lockText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -30f), new Vector2(460f, 50f));
+            upgradesLocked = locked.gameObject;
+        }
 
-            Label(right, "THỜI GIAN MỖI VÁN", 24, Accent, TextAnchor.MiddleLeft, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, -385f), new Vector2(-24f, -350f));
-            for (int i = 0; i < DurationValues.Length; i++)
+        void BuildModePanel(RectTransform safe)
+        {
+            var panel = GameSkin.Panel(safe, "Mode");
+            UIKit.Place(panel.rect, new Vector2(1f, 1f), new Vector2(-28f, -150f), new Vector2(520f, 740f));
+            GameSkin.Header(panel.rect, "flag", "CHẾ ĐỘ CHƠI");
+
+            var chase = GameSkin.Button(panel.rect, "TRỐN CẢNH SÁT", ButtonStyle.Blue, () => SetMode(GameMode.Chase), "flag", 40, true);
+            TopRow(chase.frame.rect, -90f, 88f);
+            var free = GameSkin.Button(panel.rect, "LÁI TỰ DO", ButtonStyle.Dark, () => SetMode(GameMode.FreeRoam), "car", 40, true);
+            TopRow(free.frame.rect, -190f, 88f);
+            modeButtons.Add(chase);
+            modeButtons.Add(free);
+
+            var info = UIKit.IconImage(panel.rect, "info", new Color(0.35f, 0.65f, 1f), 40f);
+            UIKit.Place(info.rectTransform, new Vector2(0f, 1f), new Vector2(28f, -298f), new Vector2(40f, 40f));
+            modeDesc = UIKit.Label(panel.rect, "", 23, GameSkin.TextDim, TextAnchor.UpperLeft, false);
+            UIKit.Place(modeDesc.rectTransform, new Vector2(0f, 1f), new Vector2(82f, -294f), new Vector2(412f, 80f));
+
+            var h2 = GameSkin.Title(panel.rect, "THỜI GIAN MỖI VÁN", 34, GameSkin.Yellow);
+            UIKit.Place(h2.rectTransform, new Vector2(0f, 1f), new Vector2(28f, -378f), new Vector2(460f, 44f));
+            for (int i = 0; i < DurationNames.Length; i++)
             {
                 float v = DurationValues[i];
-                float a0 = i / 3f, a1 = (i + 1) / 3f;
-                var b = MakeButton(right, DurationNames[i], i == 2 ? 18 : 22, Gray, () => SetDuration(v),
-                                   new Vector2(a0, 1f), new Vector2(a1, 1f),
-                                   new Vector2(i == 0 ? 24f : 6f, -455f), new Vector2(i == 2 ? -24f : -6f, -395f), out _);
-                durationImages.Add(b.GetComponent<Image>());
+                var b = GameSkin.Button(panel.rect, DurationNames[i], ButtonStyle.Dark, () => SetDuration(v), null, i == 2 ? 24 : 28);
+                float w = (520f - 44f - 20f) / 3f;
+                var rt = b.frame.rect;
+                rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(22f + i * (w + 10f), -430f);
+                rt.sizeDelta = new Vector2(w, 62f);
+                b.content.GetComponent<HorizontalLayoutGroup>().padding = new RectOffset(4, 4, 0, 0);
+                durationButtons.Add(b);
             }
-            actionButton = MakeButton(right, "", 28, Green, OnAction, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(24f, 140f), new Vector2(-24f, 215f), out actionLabel);
-            actionImage = actionButton.GetComponent<Image>();
-            MakeButton(right, "CHƠI", 36, Accent, OnPlay, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(24f, 24f), new Vector2(-24f, 120f), out playLabel);
-            playLabel.color = new Color(0.15f, 0.1f, 0f);
 
-            // ── Dưới giữa: tên xe + chỉ số ──
-            var info = Panel(root, "CarInfo", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-380f, 20f), new Vector2(380f, 380f), PanelColor);
-            carNameText = Label(info, "", 44, Color.white, TextAnchor.MiddleCenter, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(90f, -70f), new Vector2(-90f, -10f));
-            carStatusText = Label(info, "", 24, Accent, TextAnchor.MiddleCenter, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(90f, -105f), new Vector2(-90f, -70f));
-            MakeButton(info, "<", 48, Gray, () => Step(-1), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(14f, -100f), new Vector2(84f, -14f), out _);
-            MakeButton(info, ">", 48, Gray, () => Step(1), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-84f, -100f), new Vector2(-14f, -14f), out _);
+            actionButton = GameSkin.Button(panel.rect, "CHỌN XE NÀY", ButtonStyle.Blue, OnAction, "play", 38);
+            TopRow(actionButton.frame.rect, -510f, 84f);
 
-            string[] statNames = { "Tốc độ", "Tăng tốc", "Lái", "Độ bền", "Nitro" };
-            for (int i = 0; i < statNames.Length; i++)
+            playButton = GameSkin.Button(panel.rect, "CHƠI", ButtonStyle.Gold, OnPlay, null, 52, false, FrameShape.Chamfer);
+            TopRow(playButton.frame.rect, -612f, 106f);
+        }
+
+        static void TopRow(RectTransform rt, float y, float height)
+        {
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.offsetMin = new Vector2(22f, y - height);
+            rt.offsetMax = new Vector2(-22f, y);
+        }
+
+        void BuildCarCard(RectTransform safe)
+        {
+            var card = GameSkin.Panel(safe, "CarInfo", false);
+            UIKit.Place(card.rect, new Vector2(0.5f, 0f), new Vector2(0f, 100f), new Vector2(800f, 356f));
+
+            var prev = GameSkin.Button(card.rect, "", ButtonStyle.Dark, () => Step(-1), "chevronLeft", 40);
+            prev.frame.SetColors(new Color(0.1f, 0.2f, 0.45f), new Color(0.04f, 0.08f, 0.2f), GameSkin.Edge, Color.clear);
+            UIKit.Place(prev.frame.rect, new Vector2(0f, 1f), new Vector2(20f, -20f), new Vector2(80f, 80f));
+            prev.content.GetComponent<HorizontalLayoutGroup>().padding = new RectOffset(0, 0, 0, 0);
+            var next = GameSkin.Button(card.rect, "", ButtonStyle.Dark, () => Step(1), "chevron", 40);
+            next.frame.SetColors(new Color(0.1f, 0.2f, 0.45f), new Color(0.04f, 0.08f, 0.2f), GameSkin.Edge, Color.clear);
+            UIKit.Place(next.frame.rect, new Vector2(1f, 1f), new Vector2(-20f, -20f), new Vector2(80f, 80f));
+            next.content.GetComponent<HorizontalLayoutGroup>().padding = new RectOffset(0, 0, 0, 0);
+
+            carNameText = UIKit.Label(card.rect, "", 58, Color.white);
+            UIKit.Place(carNameText.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -10f), new Vector2(560f, 70f));
+            carNameText.gameObject.AddComponent<Shadow>().effectColor = new Color(0f, 0.05f, 0.2f, 0.8f);
+
+            statusPill = GameSkin.Frame(card.rect, "Status", FrameShape.Pill, Color.black, Color.black, Color.white, Color.clear);
+            UIKit.Place(statusPill.rect, new Vector2(0.5f, 1f), new Vector2(0f, -82f), new Vector2(250f, 46f));
+            statusIcon = UIKit.IconImage(statusPill.rect, "checkCircle", Color.white, 30f);
+            UIKit.Place(statusIcon.rectTransform, new Vector2(0f, 0.5f), new Vector2(16f, 0f), new Vector2(30f, 30f));
+            statusText = UIKit.Label(statusPill.rect, "", 28, Color.white);
+            UIKit.Anchors(statusText.rectTransform, Vector2.zero, Vector2.one, new Vector2(46f, 0f), new Vector2(-14f, 0f));
+
+            string[] names = { "Tốc độ", "Tăng tốc", "Lái", "Độ bền", "Nitro" };
+            string[] icons = { "speed", "rocket", "steering", "shield", "bolt" };
+            for (int i = 0; i < names.Length; i++)
             {
-                float y = -125f - i * 46f;
-                Label(info, statNames[i], 22, Color.white, TextAnchor.MiddleLeft, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(30f, y - 34f), new Vector2(160f, y));
-                var bg = Panel(info, "StatBg" + i, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(165f, y - 26f), new Vector2(-150f, y - 8f), new Color(1f, 1f, 1f, 0.12f));
-                var fill = Panel(bg, "Fill", new Vector2(0f, 0f), new Vector2(0.5f, 1f), Vector2.zero, Vector2.zero, Accent).GetComponent<Image>();
-                statFills.Add(fill);
-                statValues.Add(Label(info, "", 20, new Color(1f, 1f, 1f, 0.85f), TextAnchor.MiddleRight, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-145f, y - 34f), new Vector2(-24f, y)));
+                float y = -150f - i * 40f;
+                var ic = UIKit.IconImage(card.rect, icons[i], new Color(0.75f, 0.86f, 1f), 32f);
+                UIKit.Place(ic.rectTransform, new Vector2(0f, 1f), new Vector2(32f, y + 2f), new Vector2(32f, 32f));
+                var l = UIKit.Label(card.rect, names[i], 27, GameSkin.TextLight, TextAnchor.MiddleLeft);
+                UIKit.Place(l.rectTransform, new Vector2(0f, 1f), new Vector2(78f, y + 4f), new Vector2(150f, 36f));
+                var bar = GameSkin.StatBar(card.rect);
+                UIKit.Anchors((RectTransform)bar.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(232f, y - 24f), new Vector2(-186f, y - 6f));
+                statBars.Add(bar);
+                var v = UIKit.Label(card.rect, "", 27, GameSkin.TextLight, TextAnchor.MiddleRight);
+                UIKit.Place(v.rectTransform, new Vector2(1f, 1f), new Vector2(-30f, y + 4f), new Vector2(150f, 36f));
+                statValues.Add(v);
+            }
+        }
+
+        // ───────────────────────── Cài đặt ─────────────────────────
+
+        void BuildSettings(Transform canvas)
+        {
+            var root = UIKit.NewRect(canvas, "Settings");
+            UIKit.Stretch(root);
+            var dim = root.gameObject.AddComponent<Image>();
+            dim.color = UIKit.Dim;
+            settingsPanel = root.gameObject.AddComponent<UIFade>();
+
+            var panel = GameSkin.Panel(root, "Card");
+            UIKit.Place(panel.rect, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(660f, 540f));
+            panel.rect.pivot = new Vector2(0.5f, 0.5f);
+            GameSkin.Header(panel.rect, "gear", "CÀI ĐẶT");
+
+            var close = GameSkin.Button(panel.rect, "", ButtonStyle.Dark, () => settingsPanel.Hide(), "close", 34);
+            UIKit.Place(close.frame.rect, new Vector2(1f, 1f), new Vector2(-20f, -18f), new Vector2(64f, 64f));
+            close.content.GetComponent<HorizontalLayoutGroup>().padding = new RectOffset(0, 0, 0, 0);
+
+            var q = GameSkin.Title(panel.rect, "CHẤT LƯỢNG ĐỒ HOẠ", 32, GameSkin.Yellow);
+            UIKit.Place(q.rectTransform, new Vector2(0f, 1f), new Vector2(30f, -104f), new Vector2(560f, 44f));
+            string[] qn = { "Thấp", "Vừa", "Cao" };
+            for (int i = 0; i < 3; i++)
+            {
+                int k = i;
+                var b = GameSkin.Button(panel.rect, qn[i], ButtonStyle.Dark, () => SetQuality(k), null, 30);
+                float w = (660f - 44f - 20f) / 3f;
+                var rt = b.frame.rect;
+                rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0f, 1f);
+                rt.anchoredPosition = new Vector2(22f + i * (w + 10f), -156f);
+                rt.sizeDelta = new Vector2(w, 70f);
+                qualityButtons.Add(b);
             }
 
-            // ── Thông báo ──
-            messageText = Label(root, "", 30, Accent, TextAnchor.MiddleCenter, new Vector2(0.25f, 1f), new Vector2(0.75f, 1f), new Vector2(0f, -170f), new Vector2(0f, -110f));
-            Label(root, "← → hoặc A D: đổi xe", 18, new Color(1f, 1f, 1f, 0.6f), TextAnchor.MiddleCenter, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(-300f, 385f), new Vector2(300f, 410f));
+            resetButton = GameSkin.Button(panel.rect, "XOÁ DỮ LIỆU CHƠI", ButtonStyle.Dark, OnResetPressed, "restart", 32);
+            TopRow(resetButton.frame.rect, -262f, 80f);
+            var quit = GameSkin.Button(panel.rect, "THOÁT GAME", ButtonStyle.Dark, Application.Quit, "power", 32);
+            TopRow(quit.frame.rect, -356f, 80f);
+            var back = GameSkin.Button(panel.rect, "QUAY LẠI", ButtonStyle.Blue, () => settingsPanel.Hide(), "chevronLeft", 36);
+            TopRow(back.frame.rect, -446f, 74f);
+
+            root.gameObject.SetActive(false);
         }
 
-        // ───────────────────────── Tiện ích UI ─────────────────────────
-
-        RectTransform Panel(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax, Color color)
+        void OpenSettings()
         {
-            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
-            var rt = (RectTransform)go.transform;
-            rt.SetParent(parent, false);
-            rt.anchorMin = anchorMin;
-            rt.anchorMax = anchorMax;
-            rt.offsetMin = offsetMin;
-            rt.offsetMax = offsetMax;
-            go.GetComponent<Image>().color = color;
-            return rt;
+            RefreshQuality();
+            settingsPanel.Show();
         }
 
-        Text Label(Transform parent, string text, int size, Color color, TextAnchor align,
-                   Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax)
+        int QualityLevelFor(int option)
         {
-            var go = new GameObject("Text", typeof(RectTransform), typeof(Text), typeof(Shadow));
-            var rt = (RectTransform)go.transform;
-            rt.SetParent(parent, false);
-            rt.anchorMin = anchorMin;
-            rt.anchorMax = anchorMax;
-            rt.offsetMin = offsetMin;
-            rt.offsetMax = offsetMax;
-            var t = go.GetComponent<Text>();
-            t.font = font;
-            t.fontSize = size;
-            t.fontStyle = FontStyle.Bold;
-            t.color = color;
-            t.alignment = align;
-            t.text = text;
-            t.raycastTarget = false;
-            t.horizontalOverflow = HorizontalWrapMode.Wrap;
-            t.verticalOverflow = VerticalWrapMode.Overflow;
-            go.GetComponent<Shadow>().effectColor = new Color(0f, 0f, 0f, 0.6f);
-            return t;
+            int n = QualitySettings.names.Length;
+            return option == 0 ? 0 : (option == 1 ? n / 2 : n - 1);
         }
 
-        Button MakeButton(Transform parent, string text, int size, Color color, UnityEngine.Events.UnityAction onClick,
-                          Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax, out Text label)
+        void SetQuality(int option)
         {
-            var rt = Panel(parent, "Button", anchorMin, anchorMax, offsetMin, offsetMax, color);
-            var btn = rt.gameObject.AddComponent<Button>();
-            btn.targetGraphic = rt.GetComponent<Image>();
-            var colors = btn.colors;
-            colors.highlightedColor = new Color(1.15f, 1.15f, 1.15f, 1f);
-            colors.pressedColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-            btn.colors = colors;
-            btn.onClick.AddListener(onClick);
-            label = Label(rt, text, size, Color.white, TextAnchor.MiddleCenter, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            return btn;
+            QualitySettings.SetQualityLevel(QualityLevelFor(option), true);
+            RefreshQuality();
+            Toast("Đồ hoạ: " + QualitySettings.names[QualitySettings.GetQualityLevel()]);
+        }
+
+        void RefreshQuality()
+        {
+            int cur = QualitySettings.GetQualityLevel();
+            int best = 0;
+            for (int i = 0; i < 3; i++)
+                if (Mathf.Abs(QualityLevelFor(i) - cur) < Mathf.Abs(QualityLevelFor(best) - cur)) best = i;
+            for (int i = 0; i < qualityButtons.Count; i++) qualityButtons[i].SetStyle(i == best ? ButtonStyle.Blue : ButtonStyle.Dark);
+        }
+
+        void OnResetPressed()
+        {
+            if (resetArmedUntil <= 0f)
+            {
+                resetArmedUntil = Time.unscaledTime + 3f;
+                resetButton.SetText("BẤM LẦN NỮA ĐỂ XOÁ");
+                return;
+            }
+            resetArmedUntil = 0f;
+            resetButton.SetText("XOÁ DỮ LIỆU CHƠI");
+            SaveSystem.ResetAll();
+            index = Mathf.Max(0, catalog != null ? catalog.IndexOf(SaveSystem.Data.selectedCar) : 0);
+            ShowCar();
+            Toast("Đã xoá dữ liệu chơi");
         }
 
         // ───────────────────────── Thử nghiệm ─────────────────────────

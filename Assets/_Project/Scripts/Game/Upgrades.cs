@@ -35,10 +35,10 @@ namespace PoliceChase.Game
         {
             switch (t)
             {
-                case UpgradeType.Engine: return "+6% tốc độ tối đa, +8% độ bốc mỗi cấp";
-                case UpgradeType.Handling: return "+6% bẻ lái, +10% độ bám mỗi cấp";
-                case UpgradeType.Durability: return "Xe nặng hơn, lâu bị bắt hơn 25% mỗi cấp";
-                default: return "Giữ Shift để tăng tốc. Mỗi cấp nitro dài hơn";
+                case UpgradeType.Engine: return "Tăng tốc độ tối đa và độ bốc";
+                case UpgradeType.Handling: return "Bẻ lái nhạy, bám đường khi vào cua";
+                case UpgradeType.Durability: return "Xe chắc hơn, cảnh sát khó bắt hơn";
+                default: return "Tăng tốc tức thì, dùng được lâu hơn";
             }
         }
 
@@ -62,7 +62,7 @@ namespace PoliceChase.Game
                 grip = car.grip * (1f + 0.10f * h),
                 mass = car.mass * (1f + 0.15f * d),
                 arrestTimeMultiplier = 1f + 0.25f * d,
-                nitroSeconds = n <= 0 ? 0f : 1.5f + 0.75f * n,
+                nitroSeconds = 3f + 0.75f * n,   // 3 giây tên lửa cơ bản + mỗi cấp 0.75 giây
             };
         }
 

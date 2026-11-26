@@ -40,6 +40,11 @@ namespace PoliceChase.Vehicles
                 reset |= gp.buttonNorth.wasPressedThisFrame;
             }
 
+            // Nút cảm ứng (điện thoại)
+            throttle += MobileInput.Throttle;
+            steer += MobileInput.Steer;
+            handbrake |= MobileInput.Handbrake;
+
             car.SetInput(throttle, steer, handbrake);
             if (reset) car.ResetUpright();
         }

@@ -111,9 +111,19 @@ namespace PoliceChase.UI
             }
         }
 
+        // ───────────── Thông tin cho giao diện (GameHUD) ─────────────
+
+        [Tooltip("Tự vẽ bản đồ kiểu cũ (OnGUI). GameHUD tắt ô này và vẽ bản đồ bo tròn mới")]
+        public bool drawGui = true;
+        public Camera MapCamera => cam;
+        public RenderTexture MapTexture => rt;
+        public Transform Target => target;
+        public IReadOnlyList<PoliceAI> TrackedPolice => police;
+        public bool Big { get => big; set => big = value; }
+
         void OnGUI()
         {
-            if (cam == null || rt == null || target == null) return;
+            if (!drawGui || cam == null || rt == null || target == null) return;
             if (labelStyle == null)
                 labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
 
